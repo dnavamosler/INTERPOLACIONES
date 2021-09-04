@@ -12,7 +12,7 @@ const SEPARADOR = ";";
 const FORM_FECH = "YYYY/MM/DD HH:mm:ss";
 //const PUNTOS_SERVICIO = [];
 
-const URL_TRACKING = "./ARCHIVOS/TRACKING/AGO/1.csv";
+const URL_TRACKING = "./ARCHIVOS/TRACKING/TEST.csv";
 const URL_PC = "./ARCHIVOS/PC.csv";
 //const URL_EXPEDICIONES = './SALIDAS/expediciones.csv';
 const LISTADO_PC = [];
