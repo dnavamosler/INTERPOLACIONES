@@ -1,10 +1,11 @@
 const geolib = require("geolib");
 // const {createObjectCsvWriter} = require("csv-writer");
-
+const { v4: uuid } = require("uuid");
 const csv = require("csv-parser");
 const fs = require("fs");
 
 const moment = require("moment");
+const crearArchivos = require("./AUXILIARES/crear-archivo");
 moment.locale("es");
 
 // const auxiliar = require('./AUXILIARES/manejadorArrays');
@@ -55,27 +56,85 @@ const LEER_TRACKING = (URL) => {
 const ANALIZAR_TRACKING = (LISTADO_TRACKING, LISTADO_PC) => {
   let PASADAS_PC = [];
   let MOVILES = [];
-  LISTADO_TRACKING.forEach((element) => {
-    const FINDED = MOVILES.find((obj) => obj === element.PPU);
-    if (!FINDED) MOVILES.push(element.PPU);
+  LISTADO_TRACKING.forEach(({ PPU, HORA_CHL, NOMB_SERVI }) => {
+    const FINDED = MOVILES.find(
+      (obj) =>
+        obj.patente === PPU &&
+        moment(HORA_CHL, "DD/MM/YYYY HH:mm:ss").isSame(obj.dia, "days") &&
+        NOMB_SERVI == obj.NOMB_SERVI
+    );
+
+    if (!FINDED)
+      MOVILES.push({
+        patente: PPU,
+        dia: moment(HORA_CHL, "DD/MM/YYYY HH:mm:ss").format("YYYY-MM-DD"),
+        NOMB_SERVI,
+
+        UUID: `${PPU}|${moment(HORA_CHL, "DD/MM/YYYY HH:mm:ss").format(
+          "YYYY-MM-DD"
+        )}|${NOMB_SERVI}`,
+      });
   });
 
+  // RETIRAR SERVICIOS NO COMERCIALES
+  MOVILES = MOVILES.filter((item) => item.CODI_SENTI !== "-1");
+  MOVILES = CONSEGUIR_REGISTROS_UNICOS(MOVILES);
   let TRACK_MOVILES = {};
 
   MOVILES.forEach((element) => {
-    const TR_FILTRADOS = LISTADO_TRACKING.filter(
-      (item) => item.PPU === element
-    );
-    PASADAS_PC = LISTAR_PASADAS(TR_FILTRADOS, LISTADO_PC);
-    TRACK_MOVILES[element] = {
-      interpolaciones: FILTRAR_INTERPOLACIONES(LISTADO_PC, PASADAS_PC),
+    // const TR_FILTRADOS = LISTADO_TRACKING.filter(
+    //   (item) =>
+    //     `${item.PPU}|${moment(item.HORA_CHL, "DD/MM/YYYY HH:mm:ss").format(
+    //       "YYYY-MM-DD"
+    //     )}|${item.NOMB_SERVI}` === element.UUID
+    // ); //filtrar tracking de movil en un dia determinado y un servicio determinado
+
+    let GRUPOS = {};
+
+    Object.keys(element.grupos).forEach((grupoID) => {
+      const grupo = element.grupos[grupoID];
+      PASADAS_PC = LISTAR_PASADAS(grupo.registros, LISTADO_PC);
+
+      GRUPOS[grupoID] = {
+        ...grupo,
+        interpolaciones: FILTRAR_INTERPOLACIONES(LISTADO_PC, PASADAS_PC),
+      };
+    });
+
+    TRACK_MOVILES[element.UUID] = {
+      ...element,
+      grupos: GRUPOS,
     }; //APLANANDO}
-    PASADAS_PC = null;
   });
 
-  const LISTADO_PROCESADO = PROCESAR_LISTADO_PASADAS(TRACK_MOVILES); //TODO
+  const DATA_FINAL = PROCESAR_LISTADO_PASADAS(TRACK_MOVILES); //TODO
 
-  // console.table(LISTADO_PROCESADO);
+  crearArchivos({
+    headers: [
+      { id: "IDDE", title: "IDDE" },
+      { id: "DNI1", title: "DNI1" },
+      { id: "DNI2", title: "DNI2" },
+      { id: "PERI_MES", title: "PERI_MES" },
+      { id: "ID_SERVI", title: "ID_SERVI" },
+      { id: "NOMB_SERVI", title: "NOMB_SERVI" },
+      { id: "CODI_SENTI", title: "CODI_SENTI" },
+      { id: "PPU", title: "PPU" },
+      { id: "CODI_EXPE", title: "CODI_EXPE" },
+      { id: "HORA_CHL", title: "HORA_CHL" },
+      { id: "HORA_UTC", title: "HORA_UTC" },
+      { id: "CORRELATIVO", title: "CORRELATIVO" },
+      { id: "LATITUD", title: "LATITUD" },
+      { id: "LONGITUD", title: "LONGITUD" },
+      { id: "V_INTERPOLADA", title: "V_INTERPOLADA" },
+      { id: "PASO_HORA_CHL", title: "PASO_HORA_CHL" },
+      { id: "PASO_HORA_UTC", title: "PASO_HORA_UTC" },
+      { id: "PERIODO_HORA", title: "PERIODO_HORA" },
+      { id: "INVALIDA", title: "INVALIDA" },
+      { id: "EXTRA", title: "EXTRA" },
+    ],
+    records: DATA_FINAL,
+    pathResult: `SALIDAS/TEST-1.csv`,
+  });
 };
 
 const LISTAR_PASADAS = (TR_FILTRADOS, LISTADO_PC) => {
@@ -170,18 +229,47 @@ const FILTRAR_INTERPOLACIONES = (LISTADO_PC, PASADAS) => {
     if (PASADAS_CORRELATIVAS) LISTADO_INTERPOLAR.push(PASADAS_CORRELATIVAS);
   });
 
-  return LISTADO_INTERPOLAR;
+  return LISTADO_INTERPOLAR.filter(
+    (v, i, a) => a.findIndex((t) => t.CORRELATIVO === v.CORRELATIVO) === i
+  );
 };
 
 const PROCESAR_LISTADO_PASADAS = (TRACK_MOVILES) => {
   // console.log(TRACK_MOVILES);
 
-  fs.writeFileSync("ejemplo.json", JSON.stringify(TRACK_MOVILES, " ", 3));
-  return TRACK_MOVILES;
+  fs.writeFileSync("GRUPOS.json", JSON.stringify(TRACK_MOVILES, " ", 3));
+
   let PROCESADAS = [];
   Object.keys(TRACK_MOVILES).forEach((movil) => {
-    PROCESADAS = [...PROCESADAS, ...TRACK_MOVILES[movil]];
+    //ACCESO A MOVIL
+
+    Object.keys(TRACK_MOVILES[movil].grupos).forEach((grupo) => {
+      //ACCESO A GRUPO
+      const MAIN_SERVICE =
+        TRACK_MOVILES[movil].grupos[grupo].SERVICIO_PRINCIPAL;
+      const INTERPOLACIONES =
+        TRACK_MOVILES[movil].grupos[grupo].interpolaciones;
+      PROCESADAS = [
+        ...PROCESADAS,
+        ...INTERPOLACIONES.map((int) => {
+          return {
+            ...MAIN_SERVICE,
+            CORRELATIVO: int.CORRELATIVO,
+            LATITUD: int.LATITUD,
+            LONGITUD: int.LONGITUD,
+            PASO_HORA_CHL: int.PASO_HORA_CHL,
+            PASO_HORA_UTC: int.PASO_HORA_UTC,
+            INVALIDA: VALIDAR_INTERPOLACION(MAIN_SERVICE, INTERPOLACIONES), //revisar
+            ID_SERVI: MAIN_SERVICE.CODI_SERVI,
+            IDDE: `${MAIN_SERVICE.IDDE}${int.CORRELATIVO}`,
+            V_INTERPOLADA: int.V_INTERPOLADA,
+            EXTRA: 0,
+          };
+        }),
+      ];
+    });
   });
+
   return PROCESADAS;
 };
 
@@ -251,6 +339,34 @@ const INTERPOLAR = (COOR, COOR_PC, RADIO) => {
   return INTERPOLAR;
 };
 
+const VALIDAR_INTERPOLACION = (SERVICIO, INTERPOLACIONES) => {
+  const puntos = LISTADO_PC.filter(
+    (item) =>
+      item.NOMB_SERVI == SERVICIO.NOMB_SERVI &&
+      item.CODI_SENTI == SERVICIO.CODI_SENTI
+  );
+
+  const puntoInicial = puntos[0].POSI_PC;
+  const puntoFinal = puntos[puntos.length - 1].POSI_PC;
+  const RESTANTE = puntos.length - 2;
+  const INTERPOLACIONES_FILTRADAS = INTERPOLACIONES.filter(
+    (item) => item.CORRELATIVO != puntoInicial && item.CORRELATIVO != puntoFinal
+  );
+
+  const PRIMERA_VALIDACION =
+    INTERPOLACIONES.some((item) => item.CORRELATIVO == puntoInicial) &&
+    INTERPOLACIONES.some((item) => item.CORRELATIVO == puntoFinal)
+      ? true
+      : false;
+
+  // RESTANTE ---> 100%
+  // INTERPOLACIONES_FILTRADAS ---> x
+  const porcentajeCumplimiento =
+    (INTERPOLACIONES_FILTRADAS.length * 100) / RESTANTE;
+  const SEGUNDA_VALIDACION = porcentajeCumplimiento >= 80;
+
+  return PRIMERA_VALIDACION && SEGUNDA_VALIDACION ? "0" : "1";
+};
 //INICIO: CONDICIONES PARA PROCEDER A INTERPOLAR HORAS DE PUNTOS GPS
 // const MaxVelLineaPtosGpsUrbano = (TRACK_ANT, TRACK_POS, TIPO_PUNTO) => {
 //     const VELO_MAX = 72;
@@ -292,6 +408,84 @@ const FORMATEAR_COODENADAS = (LatLng) => {
   return LatLng.replace(/,/g, ".");
 };
 
+const CONSEGUIR_REGISTROS_UNICOS = (MOVILES) => {
+  return MOVILES.map((movil) => {
+    const TR_FILTRADOS = LISTADO_TRACKING.filter(
+      (item) => item.CODI_SENTI != "-1"
+    ).filter(
+      (item) =>
+        `${item.PPU}|${moment(item.HORA_CHL, "DD/MM/YYYY HH:mm:ss").format(
+          "YYYY-MM-DD"
+        )}|${item.NOMB_SERVI}` === movil.UUID
+    ); //filtrar tracking de movil en un dia determinado y un servicio determinado
+
+    let grupoServicios = {};
+    // SEPARACION EN SENTIDO IDA-VUELTA
+    let currentSentido = null;
+    let registroActual = null;
+    TR_FILTRADOS.forEach((item, i) => {
+      const SENTIDO_ACTUAL = item.CODI_SENTI;
+      const HORA = item.HORA_CHL;
+      const SERVICIO_PRINCIPAL = {
+        DNI1: item.DNI1,
+        DNI2: item.DNI2,
+        PERI_MES: item.PERI_MES,
+        CODI_SERVI: item.CODI_SERVI,
+        NOMB_SERVI: item.NOMB_SERVI,
+        CODI_SENTI: item.CODI_SENTI,
+        PPU: item.PPU,
+        HORA_CHL: item.HORA_CHL,
+        HORA_UTC: item.HORA_UTC,
+        CODI_EXPE: (
+          new Date(
+            moment(item.HORA_CHL, "DD/MM/YYYY HH:mm:ss").format(
+              "MM/DD/YYYY HH:mm:ss"
+            )
+          ).getTime() / 1000
+        )
+          .toString()
+          .slice(2, 10),
+        IDDE: `${item.PPU}-${item.HORA_CHL}-`,
+        PERIODO_HORA: moment(item.HORA_CHL, "DD/MM/YYYY HH:mm:ss").format("HH"),
+      };
+      if (i == 0) {
+        const id = uuid();
+        registroActual = id;
+        currentSentido = SENTIDO_ACTUAL;
+        //   CREACION DE PRIMER REGISTRO
+        grupoServicios[id] = {
+          inicio: HORA,
+          SERVICIO_PRINCIPAL,
+          sentido: currentSentido,
+          registros: [item],
+        };
+      } else {
+        // anexarRegistro si el sentido es igual
+        if (currentSentido == SENTIDO_ACTUAL) {
+          grupoServicios[registroActual] = {
+            ...grupoServicios[registroActual],
+            registros: [...grupoServicios[registroActual].registros, item],
+          };
+        } else {
+          // crear nuevo registro
+          const id = uuid();
+          registroActual = id;
+          currentSentido = SENTIDO_ACTUAL;
+
+          //   CREACION DE PRIMER REGISTRO
+          grupoServicios[id] = {
+            inicio: HORA,
+            SERVICIO_PRINCIPAL,
+            sentido: currentSentido,
+            registros: [item],
+          };
+        }
+      }
+    });
+
+    return { ...movil, grupos: grupoServicios };
+  });
+};
 const main = async () => {
   console.time("FIN");
   await LEER_PC(URL_PC);
