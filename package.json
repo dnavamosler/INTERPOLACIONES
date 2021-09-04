@@ -1,0 +1,23 @@
+{
+  "name": "procesos",
+  "version": "1.0.0",
+  "description": "Procesos Para Leer Archivos CVS desde JavaScript",
+  "main": "index.js",
+  "type": "module",
+  "dataType": "json",
+  "scripts": {
+    "pruebas": "node --experimental-modules MODULOS/expediciones.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "UTF-8"
+  ],
+  "author": "LatinSoft SpA",
+  "license": "MIT",
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "geolib": "^3.3.1",
+    "moment": "^2.29.1",
+    "moment-timezone": "^0.5.33"
+  }
+}
